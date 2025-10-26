@@ -7,9 +7,11 @@ import {
   xdr,
   Address,
   nativeToScVal,
-  scValToNative
+  scValToNative,
+  SorobanRpc
 } from '@stellar/stellar-sdk';
 import { signTx } from './freighter';
+import testnetContracts from './contracts/testnet.contracts.json';
 
 // Type alias for Horizon.Server
 type Server = Horizon.Server;
@@ -41,9 +43,12 @@ export interface BlendPool {
   status: 'active' | 'paused' | 'frozen';
 }
 
-// CreditRamp intermediary fee configuration
+// CreditRamp Auto-Lend Contract Configuration
 export const CREDITRAMP_FEE_BPS = 300; // 3% = 300 basis points
-export const CREDITRAMP_FEE_ADDRESS = 'GCREDITRAMPFEEADDRESS...'; // TODO: Replace with actual fee collection address
+export const CREDITRAMP_AUTO_LEND_CONTRACT = testnetContracts.ids.creditRampAutoLend;
+export const CREDITRAMP_TREASURY = testnetContracts.ids.treasuryAddress;
+export const BLEND_POOL_ID = testnetContracts.ids.testnetV2Pool;
+export const USDC_TOKEN_CONTRACT = testnetContracts.ids.usdcToken;
 
 export async function loadPool(network: NetworkConfig, poolId: string): Promise<BlendPool> {
   try {
@@ -108,6 +113,10 @@ export async function loadMultiplePools(network: NetworkConfig): Promise<BlendPo
   return [pool];
 }
 
+/**
+ * Supply collateral to Blend pool via CreditRamp Auto-Lend contract
+ * Automatically deducts 3% protocol fee and supplies the remaining 97% to Blend
+ */
 export async function supplyCollateral(
   poolId: string,
   asset: Asset,
@@ -116,67 +125,114 @@ export async function supplyCollateral(
   network: NetworkConfig
 ) {
   try {
-    // Calculate CreditRamp intermediary fee (3%)
+    // Calculate expected fee (for logging)
     const feeAmount = (amount * BigInt(CREDITRAMP_FEE_BPS)) / BigInt(10000);
     const netAmount = amount - feeAmount;
     
-    console.log('Supply collateral with CreditRamp fee:', {
+    console.log('🚀 Calling CreditRamp Auto-Lend Contract:', {
+      contract: CREDITRAMP_AUTO_LEND_CONTRACT,
       poolId,
       asset: asset.code,
       grossAmount: amount.toString(),
-      feeAmount: feeAmount.toString(),
-      netAmount: netAmount.toString(),
+      expectedFee: feeAmount.toString(),
+      expectedNet: netAmount.toString(),
       user,
     });
     
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Initialize Soroban RPC client
+    if (!network.rpcUrl) {
+      throw new Error('RPC URL required for Soroban operations');
+    }
+    const server = new SorobanRpc.Server(network.rpcUrl);
+    const horizonServer = new Horizon.Server(network.horizonUrl);
     
-    // Return mock success response
-    return {
-      successful: true,
-      hash: 'mock_tx_' + Math.random().toString(36).substr(2, 9),
-      ledger: Math.floor(Math.random() * 1000000),
-      feeCollected: feeAmount,
-      netSupplied: netAmount,
-    };
+    // Load user account
+    const account = await horizonServer.loadAccount(user);
     
-    /* Real implementation would be:
-     * 
-     * 1. Create a transaction with two operations:
-     *    a) Transfer fee to CreditRamp fee address
-     *    b) Supply net amount to Blend pool
-     * 
-     * const server = new Server(network.horizonUrl);
-     * const account = await server.loadAccount(user);
-     * const poolContract = new Contract(poolId);
-     * 
-     * const tx = new TransactionBuilder(account, {
-     *   fee: '100',
-     *   networkPassphrase: network.passphrase,
-     * })
-     *   // Operation 1: Transfer fee to CreditRamp
-     *   .addOperation(Operation.payment({
-     *     destination: CREDITRAMP_FEE_ADDRESS,
-     *     asset: asset,
-     *     amount: (Number(feeAmount) / 1e7).toString(),
-     *   }))
-     *   // Operation 2: Supply to Blend pool
-     *   .addOperation(poolContract.call(
-     *     'supply',
-     *     Address.fromString(user),
-     *     nativeToScVal(asset, { type: 'address' }),
-     *     nativeToScVal(netAmount, { type: 'i128' })
-     *   ))
-     *   .setTimeout(30)
-     *   .build();
-     * 
-     * const signedTx = await signTx(tx.toXDR(), user, network.passphrase);
-     * const result = await server.submitTransaction(signedTx);
-     * return result;
-     */
+    // Create CreditRamp Auto-Lend contract instance
+    const autoLendContract = new Contract(CREDITRAMP_AUTO_LEND_CONTRACT);
+    
+    // Build transaction to call auto_lend function
+    // auto_lend(amount: i128, pool_id: Address, asset: Address, from: Address, to: Address) -> i128
+    const tx = new TransactionBuilder(account, {
+      fee: '10000000', // Higher fee for Soroban operations
+      networkPassphrase: network.passphrase,
+    })
+      .addOperation(
+        autoLendContract.call(
+          'auto_lend',
+          nativeToScVal(amount, { type: 'i128' }),
+          new Address(poolId).toScVal(),
+          new Address(USDC_TOKEN_CONTRACT).toScVal(),
+          new Address(user).toScVal(),
+          new Address(user).toScVal() // to = user (supply for themselves)
+        )
+      )
+      .setTimeout(300) // 5 minutes
+      .build();
+    
+    // Simulate transaction to get auth entries
+    const simulation = await server.simulateTransaction(tx);
+    
+    if (SorobanRpc.Api.isSimulationSuccess(simulation)) {
+      console.log('✅ Simulation successful');
+      
+      // Prepare transaction with auth
+      const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
+      
+      // Sign with Freighter
+      const signedXDR = await signTx(
+        preparedTx.toXDR(),
+        network.passphrase
+      );
+      
+      const signedTx = TransactionBuilder.fromXDR(signedXDR, network.passphrase);
+      
+      // Submit transaction
+      console.log('📤 Submitting transaction...');
+      const result = await server.sendTransaction(signedTx as any);
+      
+      if (result.status === 'PENDING') {
+        console.log('⏳ Transaction pending, polling for result...');
+        
+        // Poll for transaction result
+        let getResponse = await server.getTransaction(result.hash);
+        const retries = 30;
+        let attempts = 0;
+        
+        while (getResponse.status === 'NOT_FOUND' && attempts < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          getResponse = await server.getTransaction(result.hash);
+          attempts++;
+        }
+        
+        if (getResponse.status === 'SUCCESS') {
+          console.log('✅ Transaction successful!', getResponse);
+          
+          // Parse the return value (net amount supplied)
+          const returnValue = getResponse.returnValue;
+          const netSupplied = returnValue ? scValToNative(returnValue) : netAmount;
+          
+          return {
+            successful: true,
+            hash: result.hash,
+            ledger: getResponse.ledger,
+            feeCollected: feeAmount,
+            netSupplied: BigInt(netSupplied),
+          };
+        } else {
+          console.error('❌ Transaction failed:', getResponse);
+          throw new Error(`Transaction failed: ${getResponse.status}`);
+        }
+      } else {
+        throw new Error(`Unexpected transaction status: ${result.status}`);
+      }
+    } else {
+      console.error('❌ Simulation failed:', simulation);
+      throw new Error('Transaction simulation failed: ' + simulation.error);
+    }
   } catch (error) {
-    console.error('Supply collateral error:', error);
+    console.error('❌ Supply collateral error:', error);
     throw error;
   }
 }
