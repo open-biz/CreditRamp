@@ -7,11 +7,16 @@
 [![Blend Capital](https://img.shields.io/badge/DeFi-Blend%20Capital-FF69B4?style=flat)](https://blend.capital/)
 [![Testnet Deployed](https://img.shields.io/badge/Status-Testnet%20Deployed-green.svg)](https://horizon-testnet.stellar.org/)
 
+🌐 **[Live Demo](https://credit-ramp.vercel.app/)** | 🎥 **[Watch Demo Video](https://youtu.be/YOUR_VIDEO_ID)**
+
 ## Overview
 
 CreditRamp bridges traditional fintech with DeFi on the Stellar blockchain, allowing small and medium-sized businesses (SMBs) to convert Stripe cashflows into stablecoins and access instant credit or high-yield lending via Blend Capital. By analyzing Stripe revenue data for simple underwriting, it shifts SMBs from low-yield bank accounts to efficient DeFi liquidity—fast, low-cost, and global.
 
 Built for the Stellar Hackathon, this MVP demonstrates cash-to-DeFi use cases, improving Blend protocols with data-driven credit for broader adoption.
+
+![CreditRamp Dashboard](./docs/images/dashboard-screenshot.png)
+*CreditRamp Dashboard showing Stripe integration, lending pools, and auto-lend functionality*
 
 ## Features
 
