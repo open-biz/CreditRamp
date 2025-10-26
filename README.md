@@ -3,7 +3,6 @@
 [![Stellar Blockchain](https://img.shields.io/badge/Built%20on-Stellar-7A00FF?style=flat&logo=stellar&logoColor=white)](https://stellar.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js-000000?style=flat&logo=next.js&logoColor=white)](https://nextjs.org/)
-[![Node.js](https://img.shields.io/badge/Backend-Node.js-339933?style=flat&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Stripe Integration](https://img.shields.io/badge/Integrated-Stripe-635BFF?style=flat&logo=stripe&logoColor=white)](https://stripe.com/)
 [![Blend Capital](https://img.shields.io/badge/DeFi-Blend%20Capital-FF69B4?style=flat)](https://blend.capital/)
 [![Testnet Deployed](https://img.shields.io/badge/Status-Testnet%20Deployed-green.svg)](https://horizon-testnet.stellar.org/)
@@ -41,7 +40,7 @@ Built for the Stellar Hackathon, this MVP demonstrates cash-to-DeFi use cases, i
 
 2. Install dependencies:
    ```
-   npm install
+   pnpm install
    ```
 
 3. Set up environment variables in `.env.local`:
