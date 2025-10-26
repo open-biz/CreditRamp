@@ -1,16 +1,11 @@
-[package]
-name = "creditramp-auto-lend"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+  "contracts/hello-world",
+]
 
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
+[workspace.dependencies]
 soroban-sdk = "21.0.0"
-
-[dev-dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
 
 [profile.release]
 opt-level = "z"
