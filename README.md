@@ -7,7 +7,7 @@
 [![Blend Capital](https://img.shields.io/badge/DeFi-Blend%20Capital-FF69B4?style=flat)](https://blend.capital/)
 [![Testnet Deployed](https://img.shields.io/badge/Status-Testnet%20Deployed-green.svg)](https://horizon-testnet.stellar.org/)
 
-🌐 **[Live Demo](https://credit-ramp.vercel.app/)** | 🎥 **[Watch Demo Video](https://youtu.be/YOUR_VIDEO_ID)**
+🌐 **[Live Demo](https://credit-ramp.vercel.app/)** | 🎥 **[Watch Demo Video](https://youtube.com/shorts/TMwmdk6h56s)**
 
 ## Overview
 
