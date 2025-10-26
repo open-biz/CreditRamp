@@ -20,15 +20,17 @@ echo "👤 Deploying as: $USER_ADDRESS"
 echo "💰 Treasury address: $TREASURY"
 echo ""
 
-# Navigate to contract directory
-cd contracts/hello-world
-
-# Build the contract
+# Build the contract (from workspace root)
 echo "📦 Building contract..."
+cd contracts/hello-world
 stellar contract build
+cd ../..
 
-if [ ! -f "target/wasm32-unknown-unknown/release/hello_world.wasm" ]; then
-  echo "❌ Build failed: WASM file not found"
+# Stellar CLI builds to wasm32v1-none target (relative to auto-lend dir)
+WASM_FILE="target/wasm32v1-none/release/hello_world.wasm"
+
+if [ ! -f "$WASM_FILE" ]; then
+  echo "❌ Build failed: WASM file not found at $WASM_FILE"
   exit 1
 fi
 
@@ -38,7 +40,7 @@ echo ""
 # Deploy the contract
 echo "🚀 Deploying to testnet..."
 CONTRACT_ID=$(stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/hello_world.wasm \
+  --wasm "$WASM_FILE" \
   --source creditrampdefault \
   --network testnet)
 
@@ -59,26 +61,9 @@ stellar contract invoke \
 echo "✅ Contract initialized!"
 echo ""
 
-# Query contract to verify
-echo "🔍 Verifying deployment..."
-TREASURY_CHECK=$(stellar contract invoke \
-  --id "$CONTRACT_ID" \
-  --network testnet \
-  -- \
-  get_treasury)
-
-FEE_BPS=$(stellar contract invoke \
-  --id "$CONTRACT_ID" \
-  --network testnet \
-  -- \
-  get_fee_bps)
-
-echo "✅ Treasury: $TREASURY_CHECK"
-echo "✅ Fee BPS: $FEE_BPS (3%)"
-echo ""
-
 # Save contract ID
-echo "$CONTRACT_ID" > ../../deployed-contract-id.txt
+cd ../..
+echo "$CONTRACT_ID" > deployed-contract-id.txt
 
 echo "======================================"
 echo "🎉 Deployment Complete!"

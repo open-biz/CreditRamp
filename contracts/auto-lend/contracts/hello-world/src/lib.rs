@@ -1,12 +1,13 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, BytesN, Env, Symbol, Vec, Val,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env, IntoVal, Symbol, Val, Vec,
 };
 
 const TREASURY: Symbol = symbol_short!("TREASURY");
 const FEE_BPS: i128 = 300; // 3% = 300 basis points
 
 #[contracttype]
+#[derive(Copy, Clone)]
 pub enum RequestType {
     SupplyCollateral = 1,
 }
@@ -74,7 +75,7 @@ impl CreditRampAutoLend {
 
         // Build request for Blend's submit function
         // Request structure: (u32: RequestType, Address: who, Address: asset, i128: amount)
-        let mut requests = Vec::new(&env);
+        let mut requests: Vec<Val> = Vec::new(&env);
         
         // Create supply collateral request
         let request = (
@@ -83,16 +84,15 @@ impl CreditRampAutoLend {
             asset.clone(),
             net_amount,
         );
-        requests.push_back(env.to_val(&request));
+        requests.push_back(request.into_val(&env));
 
         // Call Blend pool's submit function
         // submit(from: Address, spender: Address, to: Address, requests: Vec<Request>)
-        let args = (
-            &from,
-            &env.current_contract_address(),
-            &to,
-            requests,
-        );
+        let mut args: Vec<Val> = Vec::new(&env);
+        args.push_back(from.into_val(&env));
+        args.push_back(env.current_contract_address().into_val(&env));
+        args.push_back(to.into_val(&env));
+        args.push_back(requests.into_val(&env));
 
         env.invoke_contract::<Val>(
             &pool_id,
