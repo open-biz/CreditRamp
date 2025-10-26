@@ -1,0 +1,12 @@
+{
+  "network": "mainnet",
+  "ids": {
+    "poolFactoryV2": "MAINNET_POOL_FACTORY_ADDRESS_TBD",
+    "oraclemock": "MAINNET_ORACLE_ADDRESS_TBD",
+    "blendToken": "MAINNET_BLND_TOKEN_ADDRESS_TBD",
+    "usdcToken": "MAINNET_USDC_TOKEN_ADDRESS_TBD",
+    "creditRampFeeCollector": "MAINNET_CREDITRAMP_FEE_ADDRESS_TBD"
+  },
+  "description": "Blend Protocol V2 contract addresses on Stellar Mainnet (TBD)",
+  "lastUpdated": "2025-10-26"
+}

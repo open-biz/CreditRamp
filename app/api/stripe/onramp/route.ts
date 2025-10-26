@@ -5,27 +5,37 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { wallet_address, destination_network, destination_currency, source_amount } = body;
 
-    // Create a Crypto OnRamp Session using direct Stripe API
-    // This bypasses TypeScript type issues with the crypto namespace
+    // Create a Crypto OnRamp Session using Stripe API
+    // Reference: https://docs.stripe.com/crypto/onramp/embedded-quickstart
     const params = new URLSearchParams();
     
-    // Set wallet address using the correct parameter format
-    if (wallet_address) {
-      params.append(`transaction_details[wallet_address]`, wallet_address);
+    // Set wallet address for Stellar network
+    if (wallet_address && destination_network) {
+      params.append(`wallet_addresses[${destination_network}]`, wallet_address);
     }
     
+    // Set destination network (stellar)
     if (destination_network) {
-      params.append('transaction_details[destination_network]', destination_network);
+      params.append('destination_network', destination_network);
+      // Lock to stellar network only
+      params.append('destination_networks[]', destination_network);
     }
     
+    // Set destination currency (usdc or xlm)
     if (destination_currency) {
-      params.append('transaction_details[destination_currency]', destination_currency);
+      params.append('destination_currency', destination_currency);
+      // Lock to specific currencies (usdc and xlm only)
+      params.append('destination_currencies[]', 'usdc');
+      params.append('destination_currencies[]', 'xlm');
     }
     
+    // Set source amount and currency (USD only)
     if (source_amount) {
-      params.append('transaction_details[source_amount]', source_amount.toString());
-      params.append('transaction_details[source_currency]', 'usd');
+      params.append('source_amount', source_amount.toString());
     }
+    params.append('source_currency', 'usd');
+
+    console.log('Creating OnRamp session with params:', params.toString());
 
     const response = await fetch('https://api.stripe.com/v1/crypto/onramp_sessions', {
       method: 'POST',
@@ -36,17 +46,19 @@ export async function POST(request: NextRequest) {
       body: params.toString(),
     });
 
+    const responseData = await response.json();
+
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Stripe API error:', errorData);
-      throw new Error(errorData.error?.message || 'Failed to create OnRamp session');
+      console.error('Stripe API error:', responseData);
+      throw new Error(responseData.error?.message || 'Failed to create OnRamp session');
     }
 
-    const session = await response.json();
+    console.log('OnRamp session created successfully:', responseData.id);
 
     return NextResponse.json({
-      client_secret: session.client_secret,
-      session_id: session.id,
+      client_secret: responseData.client_secret,
+      session_id: responseData.id,
+      status: responseData.status,
     });
   } catch (error: any) {
     console.error('OnRamp session creation error:', error);

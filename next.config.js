@@ -8,6 +8,12 @@ const nextConfig = {
       net: false,
       tls: false,
     };
+
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'sodium-native': false,
+      'require-addon': false,
+    };
     return config;
   },
 }

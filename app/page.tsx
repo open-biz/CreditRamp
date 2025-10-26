@@ -9,19 +9,25 @@ import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useFreighter } from '@/hooks/useFreighter';
-import { loadPool, supplyCollateral, borrowAsset } from '@/lib/blend';
+import { loadPool, supplyCollateral, borrowAsset, loadMultiplePools, BlendPool } from '@/lib/blend';
 import { createOnRampSession, fetchPayouts } from '@/lib/stripe';
 import { Asset, Networks } from '@stellar/stellar-sdk';
 import { Wallet, TrendingUp, DollarSign, Activity } from 'lucide-react';
 import { CryptoElements, OnrampElement } from '@/components/StripeCryptoElements';
 import { loadStripeOnramp } from '@stripe/crypto';
 import { AnimatedBackground } from '@/components/AnimatedBackground';
+import { PoolCards } from '@/components/PoolCards';
 
+// Stellar Classic USDC issuer (for Asset class)
 const USDC_ASSET = new Asset('USDC', 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5');
-const POOL_ID = 'CCS5ACKIDOIVW2QMWBF7H3ZM4ZIH2Q2NP7I3P3GH7YXXGN7I3WND3D6G';
+// Soroban contract addresses
+const USDC_CONTRACT = 'CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU';
+const DEFAULT_DEPOSIT_AMOUNT = 100;
+const POOL_ID = 'CDDG7DLOWSHRYQ2HWGZEZ4UTR7LPTKFFHN3QUCSZEXOWOPARMONX6T65'; // Blend Testnet V2 Pool
 const NETWORK = {
   passphrase: Networks.TESTNET,
   horizonUrl: 'https://horizon-testnet.stellar.org',
+  rpcUrl: 'https://soroban-testnet.stellar.org',
 };
 
 // Initialize Stripe Onramp
@@ -40,10 +46,10 @@ export default function Home() {
   const [apr, setApr] = useState(0);
   const [healthFactor, setHealthFactor] = useState(0);
   const [onRampSession, setOnRampSession] = useState<any>(null);
-  const [depositAmount, setDepositAmount] = useState(100);
   const [loading, setLoading] = useState(false);
   const [businessInfo, setBusinessInfo] = useState<any>(null);
   const [stripeBalance, setStripeBalance] = useState<any>(null);
+  const [blendPools, setBlendPools] = useState<BlendPool[]>([]);
 
   useEffect(() => {
     if (stripeConnected) {
@@ -128,9 +134,14 @@ export default function Home() {
 
   const fetchPoolData = async () => {
     try {
-      const pool = await loadPool(NETWORK, POOL_ID);
-      const reserve = pool.reserves.get('USDC');
-      setApr(reserve ? Number(reserve.supplyApr) / 1e7 : 7);
+      const pools = await loadMultiplePools(NETWORK);
+      setBlendPools(pools);
+      
+      // Set APR from first pool's USDC reserve for backward compatibility
+      if (pools.length > 0) {
+        const reserve = pools[0].reserves.get('USDC');
+        setApr(reserve ? reserve.supplyApr / 100 : 7);
+      }
       setHealthFactor(1.5); // Mock health factor
     } catch (error) {
       console.error('Error loading pool:', error);
@@ -145,14 +156,34 @@ export default function Home() {
         walletAddress,
         'stellar',
         'usdc',
-        depositAmount
+        DEFAULT_DEPOSIT_AMOUNT
       );
       setOnRampSession(session);
-    } catch (error) {
+    } catch (error: any) {
       console.error('OnRamp error:', error);
-      alert('Failed to create deposit session. Make sure you have submitted the Stripe OnRamp application.');
+      const errorMessage = error.message || 'Unknown error';
+      
+      if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+        alert(
+          '⚠️ Stripe OnRamp Not Approved\n\n' +
+          'The Stripe OnRamp feature requires approval even for test mode.\n\n' +
+          'To enable deposits:\n' +
+          '1. Visit: https://dashboard.stripe.com/crypto-onramp/application\n' +
+          '2. Submit your application\n' +
+          '3. Wait 1-2 business days for approval\n\n' +
+          'For now, you can test the Blend lending features without deposits.'
+        );
+      } else {
+        alert('Failed to create deposit session: ' + errorMessage);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTestStripeOnRamp = () => {
+    if (typeof window !== 'undefined') {
+      window.open('/test-onramp', '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -389,32 +420,31 @@ export default function Home() {
                   <Progress value={(creditLimit / 1000) * 100} className="h-3" />
                 </div>
 
-                {/* Deposit Section */}
+                {/* OnRamp Actions */}
                 <div className="bg-white/5 rounded-2xl p-6 border border-white/10 space-y-4">
                   <div className="flex items-center gap-2 mb-2">
                     <TrendingUp className="w-5 h-5 text-white" />
-                    <h3 className="text-lg font-semibold text-white">Deposit Funds</h3>
+                    <h3 className="text-lg font-semibold text-white">Stripe OnRamp Actions</h3>
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-white/60">Amount</span>
-                      <span className="text-white font-semibold">${depositAmount}</span>
-                    </div>
-                    <Slider 
-                      value={[depositAmount]} 
-                      onValueChange={(v) => setDepositAmount(v[0])} 
-                      max={1000} 
-                      step={10}
-                      className="my-4"
-                    />
-                    <Button 
-                      onClick={startDeposit} 
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Button
+                      onClick={handleTestStripeOnRamp}
+                      variant="outline"
+                      className="w-full bg-transparent text-white border-white/40 hover:bg-white/10"
+                    >
+                      Test Stripe OnRamp
+                    </Button>
+                    <Button
+                      onClick={startDeposit}
                       disabled={loading}
                       className="w-full bg-white text-black hover:bg-white/90 font-semibold"
                     >
-                      Deposit ${depositAmount} via Stripe OnRamp
+                      Deposit ${DEFAULT_DEPOSIT_AMOUNT} via Stripe OnRamp
                     </Button>
                   </div>
+                  <p className="text-xs text-white/50">
+                    Use the test button to open the standalone Stripe quickstart flow. Deposits default to ${DEFAULT_DEPOSIT_AMOUNT} while we investigate API behaviour.
+                  </p>
                 </div>
 
                 {/* Lend/Borrow Tabs */}
@@ -429,6 +459,19 @@ export default function Home() {
                   </TabsList>
                   
                   <TabsContent value="lend" className="space-y-4 mt-6">
+                    {/* Blend Pool Cards */}
+                    <div className="mb-6">
+                      <h3 className="text-lg font-semibold text-white mb-3">Available Lending Pools</h3>
+                      <PoolCards 
+                        pools={blendPools}
+                        onSelectAsset={(poolId, assetSymbol) => {
+                          console.log('Selected asset:', poolId, assetSymbol);
+                          // TODO: Pre-fill lend form with selected asset
+                        }}
+                      />
+                    </div>
+
+                    {/* Lend Form */}
                     <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
                       <div className="mb-4">
                         <p className="text-sm text-white/60 mb-1">Auto-Lend Suggestion</p>
@@ -460,43 +503,19 @@ export default function Home() {
                         >
                           Supply ${lendAmount.toFixed(2)} as Collateral
                         </Button>
+                        <p className="text-xs text-white/40 text-center">
+                          Note: A 3% CreditRamp intermediary fee will be deducted
+                        </p>
                       </div>
                     </div>
                   </TabsContent>
                   
                   <TabsContent value="borrow" className="space-y-4 mt-6">
-                    <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
-                      <div className="mb-4">
-                        <p className="text-sm text-white/60 mb-1">Available to Borrow</p>
-                        <p className="text-3xl font-bold text-white">
-                          ${creditLimit.toFixed(2)}
-                        </p>
-                        <p className="text-xs text-white/50 mt-1">
-                          Based on your Stripe revenue history
-                        </p>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-white/60">Borrow Amount</span>
-                          <span className="text-white font-semibold">${borrowAmount.toFixed(2)}</span>
-                        </div>
-                        <Slider 
-                          value={[borrowAmount]} 
-                          onValueChange={(v) => setBorrowAmount(v[0])} 
-                          max={creditLimit} 
-                          step={10}
-                          className="my-4"
-                        />
-                        <Button 
-                          onClick={handleBorrow} 
-                          disabled={loading || borrowAmount === 0}
-                          className="w-full bg-white text-black hover:bg-white/90 font-semibold"
-                          size="lg"
-                        >
-                          Borrow ${borrowAmount.toFixed(2)}
-                        </Button>
-                      </div>
+                    <div className="bg-white/5 rounded-2xl p-6 border border-white/10 text-center space-y-3">
+                      <h3 className="text-xl font-semibold text-white">Borrowing is Coming Soon</h3>
+                      <p className="text-white/60">
+                        We are finalizing borrowing flows based on the latest Blend documentation. Stay tuned for updates.
+                      </p>
                     </div>
                   </TabsContent>
                 </Tabs>

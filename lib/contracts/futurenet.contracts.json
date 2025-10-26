@@ -1,0 +1,12 @@
+{
+  "network": "futurenet",
+  "ids": {
+    "poolFactoryV2": "FUTURENET_POOL_FACTORY_ADDRESS_TBD",
+    "oraclemock": "FUTURENET_ORACLE_ADDRESS_TBD",
+    "blendToken": "FUTURENET_BLND_TOKEN_ADDRESS_TBD",
+    "usdcToken": "FUTURENET_USDC_TOKEN_ADDRESS_TBD",
+    "creditRampFeeCollector": "FUTURENET_CREDITRAMP_FEE_ADDRESS_TBD"
+  },
+  "description": "Blend Protocol V2 contract addresses on Stellar Futurenet (TBD)",
+  "lastUpdated": "2025-10-26"
+}

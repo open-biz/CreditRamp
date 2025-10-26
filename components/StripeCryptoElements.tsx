@@ -70,26 +70,43 @@ export const OnrampElement: React.FC<OnrampElementProps> = ({
       containerRef.innerHTML = '';
 
       if (clientSecret && stripeOnramp) {
-        const session = stripeOnramp.createSession({
-          clientSecret,
-          appearance: appearance || { theme: 'dark' },
-        });
-
-        // Add event listeners
-        if (onReady) {
-          session.addEventListener('onramp_ui_loaded', () => {
-            onReady();
+        console.log('Mounting OnRamp with client secret:', clientSecret.substring(0, 20) + '...');
+        
+        try {
+          const session = stripeOnramp.createSession({
+            clientSecret,
+            appearance: appearance || { theme: 'dark' },
           });
-        }
 
-        if (onSessionUpdate) {
-          session.addEventListener('onramp_session_updated', (e: any) => {
-            onSessionUpdate(e.payload.session);
+          // Add event listeners
+          if (onReady) {
+            session.addEventListener('onramp_ui_loaded', () => {
+              console.log('OnRamp UI loaded successfully');
+              onReady();
+            });
+          }
+
+          if (onSessionUpdate) {
+            session.addEventListener('onramp_session_updated', (e: any) => {
+              console.log('OnRamp session updated:', e.payload.session.status);
+              onSessionUpdate(e.payload.session);
+            });
+          }
+
+          // Add error listener
+          session.addEventListener('*', (e: any) => {
+            console.log('OnRamp event:', e.type, e);
           });
-        }
 
-        session.mount(containerRef);
-        sessionRef.current = session;
+          session.mount(containerRef);
+          sessionRef.current = session;
+          console.log('OnRamp session mounted');
+        } catch (error) {
+          console.error('Error mounting OnRamp:', error);
+          containerRef.innerHTML = '<div style="padding: 20px; color: white;">Error loading OnRamp. Check console for details.</div>';
+        }
+      } else {
+        console.warn('Missing clientSecret or stripeOnramp:', { clientSecret: !!clientSecret, stripeOnramp: !!stripeOnramp });
       }
     }
 
