@@ -11,6 +11,7 @@ import {
   SorobanRpc
 } from '@stellar/stellar-sdk';
 import * as BlendSDK from '@blend-capital/blend-sdk';
+import { PoolContractV2 } from '@blend-capital/blend-sdk';
 import { signTx } from './freighter';
 import testnetContracts from './contracts/testnet.contracts.json';
 
@@ -183,9 +184,8 @@ export async function loadMultiplePools(network: NetworkConfig): Promise<BlendPo
 }
 
 /**
- * Supply collateral directly to Blend pool
- * Uses Blend's submit() function with SupplyCollateral request
- * Note: Fee collection (3%) can be added as a separate transaction
+ * Supply collateral to Blend pool using Blend SDK's PoolContractV2
+ * This uses the SDK's contract interface which properly formats all requests
  */
 export async function supplyCollateral(
   poolId: string,
@@ -195,119 +195,111 @@ export async function supplyCollateral(
   network: NetworkConfig
 ) {
   try {
-    console.log('🚀 Supplying to Blend Pool (Direct):', {
+    console.log('🚀 Supplying to Blend Pool via SDK:', {
       poolId,
       asset: asset.code,
       amount: amount.toString(),
       user,
     });
     
-    // Initialize Soroban RPC client
     if (!network.rpcUrl) {
       throw new Error('RPC URL required for Soroban operations');
     }
+
     const server = new SorobanRpc.Server(network.rpcUrl);
     const horizonServer = new Horizon.Server(network.horizonUrl);
     
     // Load user account
     const account = await horizonServer.loadAccount(user);
     
-    // Create Blend pool contract instance
-    const poolContract = new Contract(poolId);
+    // Create PoolContractV2 instance from SDK
+    const poolContract = new PoolContractV2(poolId);
     
-    // Create SupplyCollateral request
-    // Request { request_type: u32, address: Address, amount: i128 }
-    // IMPORTANT: ScMap entries MUST be sorted alphabetically by key
-    const request = xdr.ScVal.scvMap([
-      new xdr.ScMapEntry({
-        key: xdr.ScVal.scvSymbol('address'),
-        val: new Address(USDC_TOKEN_CONTRACT).toScVal()
-      }),
-      new xdr.ScMapEntry({
-        key: xdr.ScVal.scvSymbol('amount'),
-        val: nativeToScVal(amount, { type: 'i128' })
-      }),
-      new xdr.ScMapEntry({
-        key: xdr.ScVal.scvSymbol('request_type'),
-        val: xdr.ScVal.scvU32(2) // 2 = SupplyCollateral
-      })
-    ]);
+    // Build submit request using SDK's contract method
+    // This properly formats the request according to the contract spec
+    console.log('🔨 Building supply request...');
+    const submitRequest = {
+      request_type: 2, // SupplyCollateral
+      address: USDC_TOKEN_CONTRACT,
+      amount: amount,
+    };
     
-    // Build transaction to call Blend pool's submit function
-    // submit(from: Address, to: Address, spender: Address, requests: Vec<Request>) -> Vec<i128>
+    // Use SDK's submit method to generate the operation XDR
+    // This returns a base64-encoded operation that we parse and add to transaction
+    const operationXDR = poolContract.submit({
+      from: user,
+      to: user,
+      spender: user,
+      requests: [submitRequest],
+    });
+    
+    // Build transaction with the SDK-generated operation
+    console.log('🔄 Building transaction...');
+    const operation = xdr.Operation.fromXDR(operationXDR, 'base64');
+    
     const tx = new TransactionBuilder(account, {
-      fee: '10000000', // Higher fee for Soroban operations
+      fee: '10000000',
       networkPassphrase: network.passphrase,
     })
-      .addOperation(
-        poolContract.call(
-          'submit',
-          new Address(user).toScVal(),  // from
-          new Address(user).toScVal(),  // to (supply for themselves)
-          new Address(user).toScVal(),  // spender
-          xdr.ScVal.scvVec([request])   // requests
-        )
-      )
-      .setTimeout(300) // 5 minutes
+      .addOperation(operation)
+      .setTimeout(300)
       .build();
     
-    // Simulate transaction to get auth entries
-    console.log('🔄 Simulating transaction...');
+    // Simulate transaction
+    console.log('🧪 Simulating transaction...');
     const simulation = await server.simulateTransaction(tx);
     
-    if (SorobanRpc.Api.isSimulationSuccess(simulation)) {
-      console.log('✅ Simulation successful');
+    if (!SorobanRpc.Api.isSimulationSuccess(simulation)) {
+      console.error('❌ Simulation failed:', simulation);
+      throw new Error('Transaction simulation failed: ' + JSON.stringify(simulation));
+    }
+    
+    // Prepare transaction with auth
+    const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
+    
+    // Sign with Freighter
+    console.log('✍️ Please sign the transaction in your wallet...');
+    const signedXDR = await signTx(
+      preparedTx.toXDR(),
+      network.passphrase
+    );
+    
+    const signedTx = TransactionBuilder.fromXDR(signedXDR, network.passphrase);
+    
+    // Submit transaction
+    console.log('📤 Submitting transaction...');
+    const result = await server.sendTransaction(signedTx as any);
+    
+    if (result.status === 'PENDING') {
+      console.log('⏳ Transaction pending, polling for result...');
       
-      // Prepare transaction with auth
-      const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
+      // Poll for transaction result
+      let getResponse = await server.getTransaction(result.hash);
+      const retries = 30;
+      let attempts = 0;
       
-      // Sign with Freighter
-      console.log('✍️ Please sign the transaction in your wallet...');
-      const signedXDR = await signTx(
-        preparedTx.toXDR(),
-        network.passphrase
-      );
+      while (getResponse.status === 'NOT_FOUND' && attempts < retries) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        getResponse = await server.getTransaction(result.hash);
+        attempts++;
+        console.log(`⏳ Polling... attempt ${attempts}/${retries}`);
+      }
       
-      const signedTx = TransactionBuilder.fromXDR(signedXDR, network.passphrase);
-      
-      // Submit transaction
-      console.log('📤 Submitting transaction...');
-      const result = await server.sendTransaction(signedTx as any);
-      
-      if (result.status === 'PENDING') {
-        console.log('⏳ Transaction pending, polling for result...');
+      if (getResponse.status === 'SUCCESS') {
+        console.log('✅ Transaction successful!', getResponse);
         
-        // Poll for transaction result
-        let getResponse = await server.getTransaction(result.hash);
-        const retries = 30;
-        let attempts = 0;
-        
-        while (getResponse.status === 'NOT_FOUND' && attempts < retries) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          getResponse = await server.getTransaction(result.hash);
-          attempts++;
-          console.log(`⏳ Polling... attempt ${attempts}/${retries}`);
-        }
-        
-        if (getResponse.status === 'SUCCESS') {
-          console.log('✅ Transaction successful!', getResponse);
-          
-          return {
-            successful: true,
-            hash: result.hash,
-            ledger: getResponse.ledger,
-            netSupplied: amount, // Full amount supplied (fee collection separate)
-          };
-        } else {
-          console.error('❌ Transaction failed:', getResponse);
-          throw new Error(`Transaction failed: ${getResponse.status}`);
-        }
+        return {
+          successful: true,
+          hash: result.hash,
+          ledger: getResponse.ledger,
+          netSupplied: amount,
+        };
       } else {
-        throw new Error(`Unexpected transaction status: ${result.status}`);
+        console.error('❌ Transaction failed:', getResponse);
+        throw new Error(`Transaction failed: ${getResponse.status}`);
       }
     } else {
-      console.error('❌ Simulation failed:', simulation);
-      throw new Error('Transaction simulation failed: ' + simulation.error);
+      throw new Error(`Unexpected transaction status: ${result.status}`);
     }
   } catch (error) {
     console.error('❌ Supply collateral error:', error);
