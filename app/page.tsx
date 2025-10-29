@@ -52,6 +52,7 @@ export default function Home() {
   const [blendPools, setBlendPools] = useState<BlendPool[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<{ poolId: string; assetSymbol: string } | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
+  const [usingMockData, setUsingMockData] = useState(false);
 
   // Load Stripe account info on mount
   useEffect(() => {
@@ -115,6 +116,9 @@ export default function Home() {
     try {
       const response = await fetch('/api/stripe/payouts');
       const data = await response.json();
+      
+      // Check if using mock data
+      setUsingMockData(data.source === 'mock_no_api_key' || data.source === 'test_data' || data.source === 'fallback');
       
       // Store business info and balance
       if (data.accountInfo) {
@@ -334,6 +338,34 @@ export default function Home() {
           </motion.h1>
           <p className="text-white/60">Stripe-backed DeFi liquidity for SMBs</p>
         </div>
+
+        {/* Mock Data Warning Banner */}
+        {usingMockData && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-yellow-500/20 border-2 border-yellow-500/50 rounded-xl p-4 backdrop-blur-sm"
+          >
+            <div className="flex items-start gap-3">
+              <div className="text-yellow-500 text-xl">⚠️</div>
+              <div className="flex-1">
+                <h3 className="text-yellow-300 font-semibold mb-1">Using Mock Data</h3>
+                <p className="text-yellow-100/80 text-sm">
+                  Stripe API keys are not configured in production. Revenue and balance data is simulated.
+                  <br />
+                  <a 
+                    href="https://github.com/open-biz/CreditRamp/blob/main/VERCEL_SETUP.md" 
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-yellow-200 mt-1 inline-block"
+                  >
+                    → Setup Guide: Configure Vercel Environment Variables
+                  </a>
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         <Card className="bg-white/10 border-white/20 backdrop-blur-xl shadow-2xl">
           <CardHeader>

@@ -1,12 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2023-10-16',
-});
+// Validate environment variables
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+if (!STRIPE_SECRET_KEY) {
+  console.error('⚠️ STRIPE_SECRET_KEY is not configured in environment variables');
+}
+
+const stripe = STRIPE_SECRET_KEY 
+  ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' })
+  : null;
+
+// Helper function to generate mock payout data
+function getMockPayouts() {
+  return [
+    {
+      id: 'po_mock_1',
+      amount: 150000, // $1,500.00
+      currency: 'usd',
+      created: Math.floor(Date.now() / 1000) - 86400 * 30,
+      arrival_date: Math.floor(Date.now() / 1000) - 86400 * 28,
+      status: 'paid',
+    },
+    {
+      id: 'po_mock_2',
+      amount: 180000, // $1,800.00
+      currency: 'usd',
+      created: Math.floor(Date.now() / 1000) - 86400 * 60,
+      arrival_date: Math.floor(Date.now() / 1000) - 86400 * 58,
+      status: 'paid',
+    },
+    {
+      id: 'po_mock_3',
+      amount: 165000, // $1,650.00
+      currency: 'usd',
+      created: Math.floor(Date.now() / 1000) - 86400 * 90,
+      arrival_date: Math.floor(Date.now() / 1000) - 86400 * 88,
+      status: 'paid',
+    },
+  ];
+}
 
 export async function GET(request: NextRequest) {
   try {
+    // Check if Stripe is configured
+    if (!stripe) {
+      console.warn('⚠️ Stripe not configured - returning mock data');
+      return NextResponse.json({ 
+        payouts: getMockPayouts(),
+        source: 'mock_no_api_key',
+        accountInfo: {
+          businessName: 'CreditRamp (Demo - No API Key)',
+          email: 'demo@creditramp.com',
+          country: 'US',
+        },
+        balance: { available: 0, pending: 0, currency: 'usd' },
+        warning: 'Stripe API key not configured in production environment'
+      });
+    }
     // Fetch account information (business name, etc.)
     let accountInfo = null;
     try {
