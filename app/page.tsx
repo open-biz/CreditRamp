@@ -53,6 +53,16 @@ export default function Home() {
   const [selectedAsset, setSelectedAsset] = useState<{ poolId: string; assetSymbol: string } | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
 
+  // Load Stripe account info on mount
+  useEffect(() => {
+    fetchRevenue().then(() => {
+      // Auto-connect Stripe if account info loaded successfully
+      setStripeConnected(true);
+    }).catch(err => {
+      console.log('Initial Stripe load failed:', err);
+    });
+  }, []);
+
   useEffect(() => {
     if (stripeConnected) {
       fetchRevenue();

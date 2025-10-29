@@ -217,11 +217,8 @@ export async function supplyCollateral(
     
     // Create SupplyCollateral request
     // Request { request_type: u32, address: Address, amount: i128 }
+    // IMPORTANT: ScMap entries MUST be sorted alphabetically by key
     const request = xdr.ScVal.scvMap([
-      new xdr.ScMapEntry({
-        key: xdr.ScVal.scvSymbol('request_type'),
-        val: xdr.ScVal.scvU32(2) // 2 = SupplyCollateral
-      }),
       new xdr.ScMapEntry({
         key: xdr.ScVal.scvSymbol('address'),
         val: new Address(USDC_TOKEN_CONTRACT).toScVal()
@@ -229,6 +226,10 @@ export async function supplyCollateral(
       new xdr.ScMapEntry({
         key: xdr.ScVal.scvSymbol('amount'),
         val: nativeToScVal(amount, { type: 'i128' })
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('request_type'),
+        val: xdr.ScVal.scvU32(2) // 2 = SupplyCollateral
       })
     ]);
     
