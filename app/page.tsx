@@ -10,6 +10,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useFreighter } from '@/hooks/useFreighter';
 import { loadPool, supplyCollateral, borrowAsset, loadMultiplePools, BlendPool } from '@/lib/blend';
+import { signTx } from '@/lib/freighter';
 import { createOnRampSession, fetchPayouts } from '@/lib/stripe';
 import { Asset, Networks, TransactionBuilder, Operation, Horizon } from '@stellar/stellar-sdk';
 import { Wallet, TrendingUp, DollarSign, Activity } from 'lucide-react';
@@ -213,13 +214,10 @@ export default function Home() {
 
       console.log('✍️ Requesting signature from Freighter...');
       
-      // Sign with Freighter
-      const signedXDR = await (window as any).freighterApi.signTransaction(
+      // Sign with Freighter using the proper helper function
+      const signedXDR = await signTx(
         transaction.toXDR(),
-        {
-          network: 'TESTNET',
-          networkPassphrase: NETWORK.passphrase,
-        }
+        NETWORK.passphrase
       );
 
       // Submit to network
