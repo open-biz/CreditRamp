@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useFreighter } from '@/hooks/useFreighter';
 import { loadPool, supplyCollateral, borrowAsset, loadMultiplePools, BlendPool } from '@/lib/blend';
 import { createOnRampSession, fetchPayouts } from '@/lib/stripe';
-import { Asset, Networks } from '@stellar/stellar-sdk';
+import { Asset, Networks, TransactionBuilder, Operation, Horizon } from '@stellar/stellar-sdk';
 import { Wallet, TrendingUp, DollarSign, Activity } from 'lucide-react';
 import { CryptoElements, OnrampElement } from '@/components/StripeCryptoElements';
 import { loadStripeOnramp } from '@stripe/crypto';
@@ -55,6 +55,7 @@ export default function Home() {
   const [usingMockData, setUsingMockData] = useState(false);
   const [showTrustlineModal, setShowTrustlineModal] = useState(false);
   const [trustlineError, setTrustlineError] = useState<string | null>(null);
+  const [addingTrustline, setAddingTrustline] = useState(false);
 
   // Load Stripe account info on mount
   useEffect(() => {
@@ -179,6 +180,69 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Error checking wallet balance:', error);
+    }
+  };
+
+  const addUsdcTrustline = async () => {
+    if (!walletAddress) {
+      alert('Please connect your wallet first');
+      return;
+    }
+
+    try {
+      setAddingTrustline(true);
+      console.log('🔨 Creating USDC trustline...');
+
+      // Load account from Horizon
+      const horizonServer = new Horizon.Server(NETWORK.horizonUrl);
+      const account = await horizonServer.loadAccount(walletAddress);
+
+      // Build changeTrust transaction
+      const transaction = new TransactionBuilder(account, {
+        fee: '100000', // 0.001 XLM
+        networkPassphrase: NETWORK.passphrase,
+      })
+        .addOperation(
+          Operation.changeTrust({
+            asset: USDC_ASSET,
+            limit: '922337203685.4775807', // Max limit
+          })
+        )
+        .setTimeout(300) // 5 minutes
+        .build();
+
+      console.log('✍️ Requesting signature from Freighter...');
+      
+      // Sign with Freighter
+      const signedXDR = await (window as any).freighterApi.signTransaction(
+        transaction.toXDR(),
+        {
+          network: 'TESTNET',
+          networkPassphrase: NETWORK.passphrase,
+        }
+      );
+
+      // Submit to network
+      console.log('📤 Submitting trustline transaction...');
+      const signedTx = TransactionBuilder.fromXDR(signedXDR, NETWORK.passphrase);
+      const result = await horizonServer.submitTransaction(signedTx as any);
+
+      console.log('✅ Trustline created successfully!', result);
+      alert('✅ USDC trustline added successfully! You can now receive USDC.');
+
+      // Close modal and recheck balance
+      setShowTrustlineModal(false);
+      await checkWalletBalance();
+    } catch (error: any) {
+      console.error('❌ Trustline creation error:', error);
+      
+      if (error.message?.includes('User declined')) {
+        alert('❌ Transaction cancelled by user');
+      } else {
+        alert('❌ Failed to add trustline: ' + (error.message || error.toString()));
+      }
+    } finally {
+      setAddingTrustline(false);
     }
   };
 
@@ -726,17 +790,36 @@ export default function Home() {
                           </code>
                         </div>
                       </div>
-                      <a
-                        href="https://laboratory.stellar.org/#?network=test"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 mt-3 px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg text-sm font-medium transition-colors"
-                      >
-                        <span>Open Stellar Laboratory</span>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                      </a>
+                      <div className="flex gap-2 mt-3">
+                        <Button
+                          onClick={addUsdcTrustline}
+                          disabled={addingTrustline}
+                          className="flex-1 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                        >
+                          {addingTrustline ? (
+                            <>
+                              <span className="animate-spin mr-2">⏳</span>
+                              Adding...
+                            </>
+                          ) : (
+                            <>
+                              <span className="mr-2">⚡</span>
+                              Add Trustline Automatically
+                            </>
+                          )}
+                        </Button>
+                        <a
+                          href="https://laboratory.stellar.org/#?network=test"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 rounded-lg text-sm font-medium transition-colors"
+                        >
+                          <span>Manual</span>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      </div>
                     </div>
                   </div>
                 </div>
