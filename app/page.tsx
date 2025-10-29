@@ -53,6 +53,8 @@ export default function Home() {
   const [selectedAsset, setSelectedAsset] = useState<{ poolId: string; assetSymbol: string } | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
   const [usingMockData, setUsingMockData] = useState(false);
+  const [showTrustlineModal, setShowTrustlineModal] = useState(false);
+  const [trustlineError, setTrustlineError] = useState<string | null>(null);
 
   // Load Stripe account info on mount
   useEffect(() => {
@@ -244,14 +246,8 @@ export default function Home() {
     }
     
     if (usdcBalance === 0) {
-      alert(
-        '⚠️ USDC Setup Required\n\n' +
-        'Your wallet needs USDC to lend. Steps:\n' +
-        '1. Add USDC trustline (if not already)\n' +
-        '2. Get test USDC from Stellar Quest or friendbot\n' +
-        '3. Try again\n\n' +
-        'Your wallet: ' + walletAddress.slice(0, 8) + '...'
-      );
+      setTrustlineError('no_balance');
+      setShowTrustlineModal(true);
       return;
     }
     
@@ -280,14 +276,8 @@ export default function Home() {
       
       const errorMsg = error.message || error.toString();
       if (errorMsg.includes('trustline')) {
-        alert(
-          '❌ Trustline Error\n\n' +
-          'Your wallet needs a USDC trustline.\n\n' +
-          'Visit Stellar Laboratory to add trustline:\n' +
-          'https://laboratory.stellar.org/#?network=test\n\n' +
-          'Asset: USDC\n' +
-          'Issuer: GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
-        );
+        setTrustlineError('missing_trustline');
+        setShowTrustlineModal(true);
       } else {
         alert('Transaction failed: ' + errorMsg);
       }
@@ -688,6 +678,159 @@ export default function Home() {
                 />
               </CryptoElements>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Trustline Setup Modal */}
+        <Dialog open={showTrustlineModal} onOpenChange={setShowTrustlineModal}>
+          <DialogContent className="max-w-2xl bg-gradient-to-br from-purple-900/90 to-blue-900/90 border-purple-500/30 backdrop-blur-xl text-white">
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-full bg-yellow-500/20 flex items-center justify-center flex-shrink-0">
+                  <span className="text-2xl">⚠️</span>
+                </div>
+                <div className="flex-1">
+                  <h2 className="text-2xl font-bold mb-2">
+                    {trustlineError === 'no_balance' ? 'USDC Setup Required' : 'Trustline Required'}
+                  </h2>
+                  <p className="text-white/80">
+                    {trustlineError === 'no_balance' 
+                      ? 'Your wallet needs USDC to lend. Follow these steps to get started.'
+                      : 'Your wallet needs a USDC trustline to interact with USDC on Stellar.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Steps */}
+              <div className="space-y-4">
+                <div className="bg-white/10 rounded-xl p-4 border border-white/20">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0 font-bold">
+                      1
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold mb-2">Add USDC Trustline</h3>
+                      <p className="text-sm text-white/70 mb-3">
+                        A trustline tells your Stellar wallet to accept USDC tokens. Think of it like authorizing a new type of asset in your wallet.
+                      </p>
+                      <div className="bg-black/30 rounded-lg p-3 space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-white/60">Asset Code:</span>
+                          <code className="bg-white/10 px-2 py-1 rounded">USDC</code>
+                        </div>
+                        <div className="flex justify-between items-start text-xs">
+                          <span className="text-white/60 flex-shrink-0 mr-2">Issuer:</span>
+                          <code className="bg-white/10 px-2 py-1 rounded text-xs break-all">
+                            GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+                          </code>
+                        </div>
+                      </div>
+                      <a
+                        href="https://laboratory.stellar.org/#?network=test"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 mt-3 px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        <span>Open Stellar Laboratory</span>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white/10 rounded-xl p-4 border border-white/20">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0 font-bold">
+                      2
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold mb-2">Get Test USDC</h3>
+                      <p className="text-sm text-white/70 mb-3">
+                        You need some USDC tokens to start lending. Use one of these testnet faucets:
+                      </p>
+                      <div className="space-y-2">
+                        <a
+                          href="https://quest.stellar.org/learn"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>🎮 Stellar Quest (Recommended)</span>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </div>
+                          <p className="text-xs text-white/60 mt-1">Complete quests to earn test USDC</p>
+                        </a>
+                        <a
+                          href={`https://friendbot.stellar.org/?addr=${walletAddress}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>🤖 Friendbot (XLM only)</span>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </div>
+                          <p className="text-xs text-white/60 mt-1">Get test XLM for transaction fees</p>
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white/10 rounded-xl p-4 border border-white/20">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center flex-shrink-0 font-bold">
+                      3
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-semibold mb-2">Try Again</h3>
+                      <p className="text-sm text-white/70">
+                        Once you've added the trustline and received USDC, come back and try lending again. Your balance will be detected automatically.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Wallet Info */}
+              {walletAddress && (
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+                  <p className="text-xs text-white/60 mb-1">Your Wallet Address:</p>
+                  <code className="text-sm font-mono bg-black/30 px-3 py-2 rounded block break-all">
+                    {walletAddress}
+                  </code>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => setShowTrustlineModal(false)}
+                  variant="outline"
+                  className="flex-1 border-white/20 hover:bg-white/10"
+                >
+                  Close
+                </Button>
+                <Button
+                  onClick={async () => {
+                    setShowTrustlineModal(false);
+                    // Recheck balance after user presumably set up trustline
+                    await checkWalletBalance();
+                  }}
+                  className="flex-1 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                >
+                  I've Set Up My Wallet
+                </Button>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
       </motion.div>
