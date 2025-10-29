@@ -10,6 +10,7 @@ import {
   scValToNative,
   SorobanRpc
 } from '@stellar/stellar-sdk';
+import * as BlendSDK from '@blend-capital/blend-sdk';
 import { signTx } from './freighter';
 import testnetContracts from './contracts/testnet.contracts.json';
 
@@ -52,53 +53,60 @@ export const USDC_TOKEN_CONTRACT = testnetContracts.ids.usdcToken;
 
 export async function loadPool(network: NetworkConfig, poolId: string): Promise<BlendPool> {
   try {
-    // TODO: Replace with actual Blend SDK integration
-    // const pool = await PoolContract.load(network.rpcUrl, poolId);
+    if (!network.rpcUrl) {
+      throw new Error('RPC URL required for loading pool data');
+    }
+
+    // Create network object for Blend SDK
+    const blendNetwork = {
+      rpc: network.rpcUrl,
+      passphrase: network.passphrase,
+    };
+
+    // Load pool data from Blend SDK
+    const pool = await BlendSDK.PoolV2.load(blendNetwork, poolId);
     
-    // Mock pool data for testnet demonstration
-    const mockReserves = new Map<string, PoolReserve>([
-      ['USDC', {
-        assetId: 'USDC:CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU',
-        symbol: 'USDC',
-        supplyApr: 750, // 7.5%
-        borrowApr: 1200, // 12%
-        totalSupply: BigInt(1000000 * 1e7),
-        totalBorrow: BigInt(500000 * 1e7),
-        utilizationRate: 50,
-        collateralFactor: 75,
-        liquidationFactor: 80,
-      }],
-      ['XLM', {
-        assetId: 'XLM:CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
-        symbol: 'XLM',
-        supplyApr: 450, // 4.5%
-        borrowApr: 900, // 9%
-        totalSupply: BigInt(5000000 * 1e7),
-        totalBorrow: BigInt(2000000 * 1e7),
-        utilizationRate: 40,
-        collateralFactor: 70,
-        liquidationFactor: 75,
-      }],
-      ['BLND', {
-        assetId: 'BLND:CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF',
-        symbol: 'BLND',
-        supplyApr: 1250, // 12.5%
-        borrowApr: 1800, // 18%
-        totalSupply: BigInt(2000000 * 1e7),
-        totalBorrow: BigInt(800000 * 1e7),
-        utilizationRate: 40,
-        collateralFactor: 60,
-        liquidationFactor: 65,
-      }],
-    ]);
+    // Load oracle to calculate estimates
+    const poolOracle = await pool.loadOracle();
+    const poolEstimate = BlendSDK.PoolEstimate.build(pool.reserves, poolOracle);
+
+    // Convert reserves to our format
+    const reserves = new Map<string, PoolReserve>();
+    
+    // Iterate over reserves Map (assetId -> Reserve)
+    for (const [assetId, reserve] of pool.reserves) {
+      // Get asset symbol from contract address
+      const assetSymbol = getAssetSymbol(reserve.assetId);
+      
+      // Get total supply and liabilities using SDK methods
+      const totalSupply = reserve.totalSupply();
+      const totalLiabilities = reserve.totalLiabilities();
+      
+      // Calculate utilization rate
+      const utilizationRate = totalSupply > BigInt(0)
+        ? Number(totalLiabilities * BigInt(10000) / totalSupply) / 100 
+        : 0;
+      
+      reserves.set(assetSymbol, {
+        assetId: reserve.assetId,
+        symbol: assetSymbol,
+        supplyApr: Math.round(reserve.supplyApr * 10000), // SDK returns decimal (0.0732), convert to basis points (732)
+        borrowApr: Math.round(reserve.borrowApr * 10000), // SDK returns decimal (0.12), convert to basis points (1200)
+        totalSupply: totalSupply,
+        totalBorrow: totalLiabilities,
+        utilizationRate: Math.round(utilizationRate),
+        collateralFactor: Math.round(reserve.getCollateralFactor() * 100), // Convert to percentage
+        liquidationFactor: Math.round(reserve.getLiabilityFactor() * 100), // Convert to percentage
+      });
+    }
 
     return {
       id: poolId,
-      name: 'Blend Testnet Pool',
-      reserves: mockReserves,
-      totalValueLocked: BigInt(8000000 * 1e7),
-      backstopModule: 'BACKSTOP_MODULE_ADDRESS',
-      status: 'active',
+      name: pool.metadata.name || 'Blend Pool',
+      reserves,
+      totalValueLocked: BigInt(Math.floor(poolEstimate.totalSupply * 1e7)), // Convert float to bigint with 7 decimals
+      backstopModule: pool.metadata.backstop,
+      status: pool.metadata.status === 0 ? 'active' : pool.metadata.status === 1 ? 'paused' : 'frozen',
     };
   } catch (error) {
     console.error('Error loading pool:', error);
@@ -106,16 +114,78 @@ export async function loadPool(network: NetworkConfig, poolId: string): Promise<
   }
 }
 
+/**
+ * Helper function to get asset symbol from contract address
+ */
+function getAssetSymbol(assetId: string): string {
+  const assetMap: { [key: string]: string } = {
+    [testnetContracts.ids.usdcToken]: 'USDC',
+    [testnetContracts.ids.xlmToken]: 'XLM',
+    [testnetContracts.ids.blendToken]: 'BLND',
+    [testnetContracts.ids.wethToken]: 'wETH',
+    [testnetContracts.ids.wbtcToken]: 'wBTC',
+  };
+  return assetMap[assetId] || 'UNKNOWN';
+}
+
 export async function loadMultiplePools(network: NetworkConfig): Promise<BlendPool[]> {
-  // In production, fetch all available pools from Blend
-  // For now, return the official Blend Testnet V2 Pool
-  const pool = await loadPool(network, 'CDDG7DLOWSHRYQ2HWGZEZ4UTR7LPTKFFHN3QUCSZEXOWOPARMONX6T65');
-  return [pool];
+  try {
+    if (!network.rpcUrl) {
+      throw new Error('RPC URL required for loading pools');
+    }
+
+    // Create network object for Blend SDK
+    const blendNetwork = {
+      rpc: network.rpcUrl,
+      passphrase: network.passphrase,
+    };
+
+    console.log('🔍 Fetching available pools from reward zone...');
+    
+    // Load backstop configuration to get reward zone pools
+    const backstopConfig = await BlendSDK.BackstopConfig.load(
+      blendNetwork,
+      testnetContracts.ids.backstopV2
+    );
+
+    console.log(`✅ Found ${backstopConfig.rewardZone.length} pools in reward zone:`, backstopConfig.rewardZone);
+
+    // Load each pool from the reward zone
+    const poolPromises = backstopConfig.rewardZone.map(async (poolId: string) => {
+      try {
+        return await loadPool(network, poolId);
+      } catch (error) {
+        console.error(`Failed to load pool ${poolId}:`, error);
+        return null;
+      }
+    });
+
+    const pools = await Promise.all(poolPromises);
+    
+    // Filter out any failed pools
+    const validPools = pools.filter((pool: BlendPool | null): pool is BlendPool => pool !== null);
+    
+    console.log(`✅ Successfully loaded ${validPools.length} pools`);
+    
+    return validPools;
+  } catch (error) {
+    console.error('Error loading pools from reward zone:', error);
+    // Fallback to single known pool if reward zone fetch fails
+    console.log('⚠️ Falling back to single testnet pool...');
+    try {
+      const pool = await loadPool(network, testnetContracts.ids.testnetV2Pool);
+      return [pool];
+    } catch (fallbackError) {
+      console.error('Fallback pool load failed:', fallbackError);
+      return [];
+    }
+  }
 }
 
 /**
- * Supply collateral to Blend pool via CreditRamp Auto-Lend contract
- * Automatically deducts 3% protocol fee and supplies the remaining 97% to Blend
+ * Supply collateral directly to Blend pool
+ * Uses Blend's submit() function with SupplyCollateral request
+ * Note: Fee collection (3%) can be added as a separate transaction
  */
 export async function supplyCollateral(
   poolId: string,
@@ -125,17 +195,10 @@ export async function supplyCollateral(
   network: NetworkConfig
 ) {
   try {
-    // Calculate expected fee (for logging)
-    const feeAmount = (amount * BigInt(CREDITRAMP_FEE_BPS)) / BigInt(10000);
-    const netAmount = amount - feeAmount;
-    
-    console.log('🚀 Calling CreditRamp Auto-Lend Contract:', {
-      contract: CREDITRAMP_AUTO_LEND_CONTRACT,
+    console.log('🚀 Supplying to Blend Pool (Direct):', {
       poolId,
       asset: asset.code,
-      grossAmount: amount.toString(),
-      expectedFee: feeAmount.toString(),
-      expectedNet: netAmount.toString(),
+      amount: amount.toString(),
       user,
     });
     
@@ -149,29 +212,46 @@ export async function supplyCollateral(
     // Load user account
     const account = await horizonServer.loadAccount(user);
     
-    // Create CreditRamp Auto-Lend contract instance
-    const autoLendContract = new Contract(CREDITRAMP_AUTO_LEND_CONTRACT);
+    // Create Blend pool contract instance
+    const poolContract = new Contract(poolId);
     
-    // Build transaction to call auto_lend function
-    // auto_lend(amount: i128, pool_id: Address, asset: Address, from: Address, to: Address) -> i128
+    // Create SupplyCollateral request
+    // Request { request_type: u32, address: Address, amount: i128 }
+    const request = xdr.ScVal.scvMap([
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('request_type'),
+        val: xdr.ScVal.scvU32(2) // 2 = SupplyCollateral
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('address'),
+        val: new Address(USDC_TOKEN_CONTRACT).toScVal()
+      }),
+      new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol('amount'),
+        val: nativeToScVal(amount, { type: 'i128' })
+      })
+    ]);
+    
+    // Build transaction to call Blend pool's submit function
+    // submit(from: Address, to: Address, spender: Address, requests: Vec<Request>) -> Vec<i128>
     const tx = new TransactionBuilder(account, {
       fee: '10000000', // Higher fee for Soroban operations
       networkPassphrase: network.passphrase,
     })
       .addOperation(
-        autoLendContract.call(
-          'auto_lend',
-          nativeToScVal(amount, { type: 'i128' }),
-          new Address(poolId).toScVal(),
-          new Address(USDC_TOKEN_CONTRACT).toScVal(),
-          new Address(user).toScVal(),
-          new Address(user).toScVal() // to = user (supply for themselves)
+        poolContract.call(
+          'submit',
+          new Address(user).toScVal(),  // from
+          new Address(user).toScVal(),  // to (supply for themselves)
+          new Address(user).toScVal(),  // spender
+          xdr.ScVal.scvVec([request])   // requests
         )
       )
       .setTimeout(300) // 5 minutes
       .build();
     
     // Simulate transaction to get auth entries
+    console.log('🔄 Simulating transaction...');
     const simulation = await server.simulateTransaction(tx);
     
     if (SorobanRpc.Api.isSimulationSuccess(simulation)) {
@@ -181,6 +261,7 @@ export async function supplyCollateral(
       const preparedTx = SorobanRpc.assembleTransaction(tx, simulation).build();
       
       // Sign with Freighter
+      console.log('✍️ Please sign the transaction in your wallet...');
       const signedXDR = await signTx(
         preparedTx.toXDR(),
         network.passphrase
@@ -204,21 +285,17 @@ export async function supplyCollateral(
           await new Promise(resolve => setTimeout(resolve, 1000));
           getResponse = await server.getTransaction(result.hash);
           attempts++;
+          console.log(`⏳ Polling... attempt ${attempts}/${retries}`);
         }
         
         if (getResponse.status === 'SUCCESS') {
           console.log('✅ Transaction successful!', getResponse);
           
-          // Parse the return value (net amount supplied)
-          const returnValue = getResponse.returnValue;
-          const netSupplied = returnValue ? scValToNative(returnValue) : netAmount;
-          
           return {
             successful: true,
             hash: result.hash,
             ledger: getResponse.ledger,
-            feeCollected: feeAmount,
-            netSupplied: BigInt(netSupplied),
+            netSupplied: amount, // Full amount supplied (fee collection separate)
           };
         } else {
           console.error('❌ Transaction failed:', getResponse);

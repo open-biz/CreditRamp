@@ -6,10 +6,11 @@ import { motion } from 'framer-motion';
 
 interface PoolCardsProps {
   pools: BlendPool[];
+  selectedAsset?: { poolId: string; assetSymbol: string } | null;
   onSelectAsset?: (poolId: string, assetSymbol: string) => void;
 }
 
-export function PoolCards({ pools, onSelectAsset }: PoolCardsProps) {
+export function PoolCards({ pools, selectedAsset, onSelectAsset }: PoolCardsProps) {
   if (!pools || pools.length === 0) {
     return (
       <div className="bg-white/5 rounded-2xl p-6 border border-white/10 text-center">
@@ -46,6 +47,7 @@ export function PoolCards({ pools, onSelectAsset }: PoolCardsProps) {
                 key={reserve.symbol} 
                 reserve={reserve}
                 poolId={pool.id}
+                isSelected={selectedAsset?.poolId === pool.id && selectedAsset?.assetSymbol === reserve.symbol}
                 onSelect={onSelectAsset}
               />
             ))}
@@ -59,17 +61,22 @@ export function PoolCards({ pools, onSelectAsset }: PoolCardsProps) {
 interface AssetCardProps {
   reserve: PoolReserve;
   poolId: string;
+  isSelected?: boolean;
   onSelect?: (poolId: string, assetSymbol: string) => void;
 }
 
-function AssetCard({ reserve, poolId, onSelect }: AssetCardProps) {
+function AssetCard({ reserve, poolId, isSelected, onSelect }: AssetCardProps) {
   const supplyAprDisplay = (reserve.supplyApr / 100).toFixed(2);
   const borrowAprDisplay = (reserve.borrowApr / 100).toFixed(2);
 
   return (
     <motion.div
       whileHover={{ scale: 1.02 }}
-      className="bg-white/5 rounded-2xl p-5 border border-white/10 cursor-pointer hover:border-white/20 transition-all"
+      className={`rounded-2xl p-5 border cursor-pointer transition-all ${
+        isSelected 
+          ? 'bg-blue-500/20 border-blue-400 shadow-lg shadow-blue-500/20' 
+          : 'bg-white/5 border-white/10 hover:border-white/20'
+      }`}
       onClick={() => onSelect?.(poolId, reserve.symbol)}
     >
       {/* Asset Header */}

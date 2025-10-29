@@ -50,6 +50,8 @@ export default function Home() {
   const [businessInfo, setBusinessInfo] = useState<any>(null);
   const [stripeBalance, setStripeBalance] = useState<any>(null);
   const [blendPools, setBlendPools] = useState<BlendPool[]>([]);
+  const [selectedAsset, setSelectedAsset] = useState<{ poolId: string; assetSymbol: string } | null>(null);
+  const [usdcBalance, setUsdcBalance] = useState<number>(0);
 
   useEffect(() => {
     if (stripeConnected) {
@@ -60,6 +62,7 @@ export default function Home() {
   useEffect(() => {
     if (walletAddress) {
       fetchPoolData();
+      checkWalletBalance();
     }
   }, [walletAddress]);
 
@@ -123,12 +126,43 @@ export default function Home() {
         const limit = (avgRev * 0.8) / 2;
         setCreditLimit(limit);
         
-        // Set mock APR and health factor
-        setApr(7.5);
-        setHealthFactor(1.85);
+        // Health factor calculation could be based on credit utilization
+        // For now, set a conservative default
+        setHealthFactor(2.0);
       }
     } catch (error) {
       console.error('Revenue fetch error:', error);
+    }
+  };
+
+  const checkWalletBalance = async () => {
+    if (!walletAddress) return;
+    try {
+      const response = await fetch(
+        `https://horizon-testnet.stellar.org/accounts/${walletAddress}`
+      );
+      const data = await response.json();
+      
+      console.log('💰 Wallet Info:', {
+        address: walletAddress,
+        balances: data.balances
+      });
+      
+      // Find USDC balance
+      const usdcAsset = data.balances.find(
+        (b: any) => b.asset_code === 'USDC' && 
+        b.asset_issuer === 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
+      );
+      
+      if (usdcAsset) {
+        setUsdcBalance(parseFloat(usdcAsset.balance));
+        console.log('✅ USDC Balance:', usdcAsset.balance);
+      } else {
+        console.warn('⚠️ No USDC trustline found for this wallet');
+        setUsdcBalance(0);
+      }
+    } catch (error) {
+      console.error('Error checking wallet balance:', error);
     }
   };
 
@@ -137,12 +171,13 @@ export default function Home() {
       const pools = await loadMultiplePools(NETWORK);
       setBlendPools(pools);
       
-      // Set APR from first pool's USDC reserve for backward compatibility
+      // Set APR from first pool's USDC reserve (real data from blockchain)
       if (pools.length > 0) {
         const reserve = pools[0].reserves.get('USDC');
-        setApr(reserve ? reserve.supplyApr / 100 : 7);
+        if (reserve) {
+          setApr(reserve.supplyApr / 100); // Convert basis points to percentage
+        }
       }
-      setHealthFactor(1.5); // Mock health factor
     } catch (error) {
       console.error('Error loading pool:', error);
     }
@@ -188,17 +223,60 @@ export default function Home() {
   };
 
   const handleLend = async () => {
+    // Pre-flight checks
+    if (!walletAddress) {
+      alert('Please connect your wallet first');
+      return;
+    }
+    
+    if (usdcBalance === 0) {
+      alert(
+        '⚠️ USDC Setup Required\n\n' +
+        'Your wallet needs USDC to lend. Steps:\n' +
+        '1. Add USDC trustline (if not already)\n' +
+        '2. Get test USDC from Stellar Quest or friendbot\n' +
+        '3. Try again\n\n' +
+        'Your wallet: ' + walletAddress.slice(0, 8) + '...'
+      );
+      return;
+    }
+    
+    if (lendAmount > usdcBalance) {
+      alert(`Insufficient balance. You have ${usdcBalance.toFixed(2)} USDC`);
+      return;
+    }
+    
     if (lendAmount > creditLimit * 0.5) {
       alert('Exceeds auto-lend limit (50% of credit limit)');
       return;
     }
+    
     try {
       setLoading(true);
+      console.log('🚀 Starting lend with wallet:', walletAddress);
+      console.log('💵 Amount to lend:', lendAmount, 'USDC');
+      
       await supplyCollateral(POOL_ID, USDC_ASSET, BigInt(Math.floor(lendAmount * 1e7)), walletAddress!, NETWORK);
+      
       alert('Lend successful! Your collateral has been supplied to the pool.');
-    } catch (error) {
+      // Refresh balance
+      await checkWalletBalance();
+    } catch (error: any) {
       console.error('Lend error:', error);
-      alert('Lending popup displayed! (Demo mode - contract integration in progress)');
+      
+      const errorMsg = error.message || error.toString();
+      if (errorMsg.includes('trustline')) {
+        alert(
+          '❌ Trustline Error\n\n' +
+          'Your wallet needs a USDC trustline.\n\n' +
+          'Visit Stellar Laboratory to add trustline:\n' +
+          'https://laboratory.stellar.org/#?network=test\n\n' +
+          'Asset: USDC\n' +
+          'Issuer: GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
+        );
+      } else {
+        alert('Transaction failed: ' + errorMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -315,6 +393,15 @@ export default function Home() {
                     <p className="font-mono text-white">
                       {walletAddress?.slice(0, 8)}...{walletAddress?.slice(-6)}
                     </p>
+                    <div className="mt-2 pt-2 border-t border-white/10">
+                      <p className="text-xs text-white/50">USDC Balance</p>
+                      <p className={`text-lg font-semibold ${usdcBalance > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {usdcBalance.toFixed(2)} USDC
+                      </p>
+                      {usdcBalance === 0 && (
+                        <p className="text-xs text-red-400/60 mt-1">⚠️ No trustline</p>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -401,8 +488,16 @@ export default function Home() {
                   </div>
                   
                   <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
-                    <p className="text-xs text-white/60 mb-1">APR</p>
-                    <p className="text-2xl font-bold text-white">{apr.toFixed(1)}%</p>
+                    <p className="text-xs text-white/60 mb-1">
+                      Supply APR {selectedAsset && `(${selectedAsset.assetSymbol})`}
+                    </p>
+                    <p className="text-2xl font-bold text-green-400">{apr.toFixed(2)}%</p>
+                    {!selectedAsset && (
+                      <p className="text-xs text-white/40 mt-1">Select an asset below</p>
+                    )}
+                    {selectedAsset && (
+                      <p className="text-xs text-green-400/60 mt-1">Live from blockchain ✓</p>
+                    )}
                   </div>
                   
                   <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
@@ -464,9 +559,17 @@ export default function Home() {
                       <h3 className="text-lg font-semibold text-white mb-3">Available Lending Pools</h3>
                       <PoolCards 
                         pools={blendPools}
+                        selectedAsset={selectedAsset}
                         onSelectAsset={(poolId, assetSymbol) => {
                           console.log('Selected asset:', poolId, assetSymbol);
-                          // TODO: Pre-fill lend form with selected asset
+                          setSelectedAsset({ poolId, assetSymbol });
+                          
+                          // Update APR based on selected asset
+                          const pool = blendPools.find(p => p.id === poolId);
+                          const reserve = pool?.reserves.get(assetSymbol);
+                          if (reserve) {
+                            setApr(reserve.supplyApr / 100);
+                          }
                         }}
                       />
                     </div>
