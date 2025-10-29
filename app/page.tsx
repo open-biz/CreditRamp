@@ -19,17 +19,52 @@ import { loadStripeOnramp } from '@stripe/crypto';
 import { AnimatedBackground } from '@/components/AnimatedBackground';
 import { PoolCards } from '@/components/PoolCards';
 
-// Stellar Classic USDC issuer (for Asset class)
-const USDC_ASSET = new Asset('USDC', 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5');
-// Soroban contract addresses
-const USDC_CONTRACT = 'CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU';
+// Stellar Classic asset issuers
+const ASSET_ISSUERS = {
+  USDC: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+  XLM: undefined, // Native asset
+  BLND: 'GB2QIYT2VE7OTQHVAQAORKDZFHQZMGDHG3CKZIAZSH4W7PGDSKLTPOIG',
+  wETH: 'GDLG5KSCQ3R7NVEAOG4M6OEQCBCSQNLN7W3BKHTUGQNWKUIQRYQ4MGZZ',
+  wBTC: 'GBRSBQPCLLV7FPTFUWUPDAJTQRQMDYLRUZHPB6XQKGQPXR7VHLDQKCQ6',
+};
+
+// Soroban contract addresses (from testnet.contracts.json)
+const ASSET_CONTRACTS = {
+  USDC: 'CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU',
+  XLM: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
+  BLND: 'CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF',
+  wETH: 'CAZAQB3D7KSLSNOSQKYD2V4JP5V2Y3B4RDJZRLBFCCIXDCTE3WHSY3UE',
+  wBTC: 'CAP5AMC2OHNVREO66DFIN6DHJMPOBAJ2KCDDIMFBR7WWJH5RZBFM3UEI',
+};
+
 const DEFAULT_DEPOSIT_AMOUNT = 100;
-const POOL_ID = 'CDDG7DLOWSHRYQ2HWGZEZ4UTR7LPTKFFHN3QUCSZEXOWOPARMONX6T65'; // Blend Testnet V2 Pool
+const DEFAULT_POOL_ID = 'CDDG7DLOWSHRYQ2HWGZEZ4UTR7LPTKFFHN3QUCSZEXOWOPARMONX6T65'; // Blend Testnet V2 Pool
 const NETWORK = {
   passphrase: Networks.TESTNET,
   horizonUrl: 'https://horizon-testnet.stellar.org',
   rpcUrl: 'https://soroban-testnet.stellar.org',
 };
+
+// Helper: Convert asset symbol to Stellar Asset
+function getAssetFromSymbol(symbol: string): Asset {
+  if (symbol === 'XLM') {
+    return Asset.native();
+  }
+  const issuer = ASSET_ISSUERS[symbol as keyof typeof ASSET_ISSUERS];
+  if (!issuer) {
+    throw new Error(`Unknown asset symbol: ${symbol}`);
+  }
+  return new Asset(symbol, issuer);
+}
+
+// Helper: Get asset contract address
+function getAssetContract(symbol: string): string {
+  const contract = ASSET_CONTRACTS[symbol as keyof typeof ASSET_CONTRACTS];
+  if (!contract) {
+    throw new Error(`Unknown asset contract for: ${symbol}`);
+  }
+  return contract;
+}
 
 // Initialize Stripe Onramp
 const stripeOnrampPromise = loadStripeOnramp(
@@ -53,6 +88,7 @@ export default function Home() {
   const [blendPools, setBlendPools] = useState<BlendPool[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<{ poolId: string; assetSymbol: string } | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<number>(0);
+  const [assetBalances, setAssetBalances] = useState<{ [key: string]: number }>({});
   const [usingMockData, setUsingMockData] = useState(false);
   const [showTrustlineModal, setShowTrustlineModal] = useState(false);
   const [trustlineError, setTrustlineError] = useState<string | null>(null);
@@ -166,18 +202,32 @@ export default function Home() {
         balances: data.balances
       });
       
-      // Find USDC balance
-      const usdcAsset = data.balances.find(
-        (b: any) => b.asset_code === 'USDC' && 
-        b.asset_issuer === 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
-      );
+      // Store all asset balances
+      const balances: { [key: string]: number } = {};
       
-      if (usdcAsset) {
-        setUsdcBalance(parseFloat(usdcAsset.balance));
-        console.log('✅ USDC Balance:', usdcAsset.balance);
-      } else {
-        console.warn('⚠️ No USDC trustline found for this wallet');
-        setUsdcBalance(0);
+      data.balances.forEach((b: any) => {
+        if (b.asset_type === 'native') {
+          // XLM native balance
+          balances['XLM'] = parseFloat(b.balance);
+          console.log('✅ XLM Balance:', b.balance);
+        } else if (b.asset_code && b.asset_issuer) {
+          // Other assets - match by issuer
+          Object.entries(ASSET_ISSUERS).forEach(([symbol, issuer]) => {
+            if (issuer && b.asset_issuer === issuer && b.asset_code === symbol) {
+              balances[symbol] = parseFloat(b.balance);
+              console.log(`✅ ${symbol} Balance:`, b.balance);
+            }
+          });
+        }
+      });
+      
+      setAssetBalances(balances);
+      
+      // Keep USDC balance for backward compatibility
+      setUsdcBalance(balances['USDC'] || 0);
+      
+      if (Object.keys(balances).length === 0) {
+        console.warn('⚠️ No recognized asset balances found');
       }
     } catch (error) {
       console.error('Error checking wallet balance:', error);
@@ -198,14 +248,15 @@ export default function Home() {
       const horizonServer = new Horizon.Server(NETWORK.horizonUrl);
       const account = await horizonServer.loadAccount(walletAddress);
 
-      // Build changeTrust transaction
+      // Build changeTrust transaction for USDC
+      const usdcAsset = getAssetFromSymbol('USDC');
       const transaction = new TransactionBuilder(account, {
         fee: '100000', // 0.001 XLM
         networkPassphrase: NETWORK.passphrase,
       })
         .addOperation(
           Operation.changeTrust({
-            asset: USDC_ASSET,
+            asset: usdcAsset,
             limit: '922337203685.4775807', // Max limit
           })
         )
@@ -304,14 +355,24 @@ export default function Home() {
       return;
     }
     
-    if (usdcBalance === 0) {
+    // Check if asset is selected
+    if (!selectedAsset) {
+      alert('Please select an asset from the pool cards below');
+      return;
+    }
+    
+    const assetSymbol = selectedAsset.assetSymbol;
+    const assetBalance = assetBalances[assetSymbol] || 0;
+    
+    // Check if user has balance for selected asset
+    if (assetBalance === 0) {
       setTrustlineError('no_balance');
       setShowTrustlineModal(true);
       return;
     }
     
-    if (lendAmount > usdcBalance) {
-      alert(`Insufficient balance. You have ${usdcBalance.toFixed(2)} USDC`);
+    if (lendAmount > assetBalance) {
+      alert(`Insufficient balance. You have ${assetBalance.toFixed(2)} ${assetSymbol}`);
       return;
     }
     
@@ -323,11 +384,16 @@ export default function Home() {
     try {
       setLoading(true);
       console.log('🚀 Starting lend with wallet:', walletAddress);
-      console.log('💵 Amount to lend:', lendAmount, 'USDC');
+      console.log(`💵 Amount to lend: ${lendAmount} ${assetSymbol}`);
+      console.log('🎯 Pool ID:', selectedAsset.poolId);
       
-      await supplyCollateral(POOL_ID, USDC_ASSET, BigInt(Math.floor(lendAmount * 1e7)), walletAddress!, NETWORK);
+      // Get the correct Asset object and pool ID
+      const asset = getAssetFromSymbol(assetSymbol);
+      const poolId = selectedAsset.poolId;
       
-      alert('Lend successful! Your collateral has been supplied to the pool.');
+      await supplyCollateral(poolId, asset, BigInt(Math.floor(lendAmount * 1e7)), walletAddress!, NETWORK);
+      
+      alert(`Lend successful! ${lendAmount.toFixed(2)} ${assetSymbol} supplied to the pool.`);
       // Refresh balance
       await checkWalletBalance();
     } catch (error: any) {
@@ -346,17 +412,33 @@ export default function Home() {
   };
 
   const handleBorrow = async () => {
+    if (!walletAddress) {
+      alert('Please connect your wallet first');
+      return;
+    }
+    
+    if (!selectedAsset) {
+      alert('Please select an asset from the pool cards below');
+      return;
+    }
+    
     if (borrowAmount > creditLimit) {
       alert('Exceeds credit limit');
       return;
     }
+    
     try {
       setLoading(true);
-      await borrowAsset(POOL_ID, USDC_ASSET, BigInt(Math.floor(borrowAmount * 1e7)), walletAddress!, NETWORK);
-      alert('Borrow successful! Funds have been transferred to your wallet.');
+      const assetSymbol = selectedAsset.assetSymbol;
+      const asset = getAssetFromSymbol(assetSymbol);
+      const poolId = selectedAsset.poolId;
+      
+      console.log(`💰 Borrowing ${borrowAmount} ${assetSymbol} from pool`);
+      await borrowAsset(poolId, asset, BigInt(Math.floor(borrowAmount * 1e7)), walletAddress!, NETWORK);
+      alert(`Borrow successful! ${borrowAmount.toFixed(2)} ${assetSymbol} transferred to your wallet.`);
     } catch (error) {
       console.error('Borrow error:', error);
-      alert('Borrow transaction failed. Please try again.');
+      alert('Transaction failed');
     } finally {
       setLoading(false);
     }
