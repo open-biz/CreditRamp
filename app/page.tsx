@@ -8,6 +8,7 @@ import { Slider } from '@/components/ui/slider';
 import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useFreighter } from '@/hooks/useFreighter';
 import { loadPool, supplyCollateral, borrowAsset, loadMultiplePools, BlendPool } from '@/lib/blend';
 import { createOnRampSession, fetchPayouts } from '@/lib/stripe';
@@ -590,10 +591,48 @@ export default function Home() {
                     )}
                   </div>
                   
-                  <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
-                    <p className="text-xs text-white/60 mb-1">Health Factor</p>
-                    <p className="text-2xl font-bold text-white">{healthFactor.toFixed(2)}</p>
-                  </div>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="bg-white/5 rounded-2xl p-5 border border-white/10 cursor-help">
+                          <p className="text-xs text-white/60 mb-1 flex items-center gap-1">
+                            Health Factor
+                            <span className="text-white/40 text-[10px]">ⓘ</span>
+                          </p>
+                          <p className="text-2xl font-bold text-white">{healthFactor.toFixed(2)}</p>
+                          <p className="text-xs mt-1 font-medium">
+                            {healthFactor >= 2.0 && <span className="text-green-400">Excellent ✓</span>}
+                            {healthFactor >= 1.5 && healthFactor < 2.0 && <span className="text-yellow-400">Good</span>}
+                            {healthFactor >= 1.1 && healthFactor < 1.5 && <span className="text-orange-400">Fair</span>}
+                            {healthFactor > 0 && healthFactor < 1.1 && <span className="text-red-400">At Risk!</span>}
+                          </p>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs bg-gray-900 border-gray-700 p-4">
+                        <div className="space-y-2">
+                          <p className="font-semibold text-white">Health Factor Explained</p>
+                          <p className="text-sm text-gray-300">
+                            Measures the safety of your lending position.
+                          </p>
+                          <div className="text-xs text-gray-400 space-y-1 pt-2 border-t border-gray-700">
+                            <p className="font-medium text-gray-300">Formula:</p>
+                            <p className="font-mono bg-black/30 p-2 rounded">
+                              (Collateral Value × Liquidation Threshold) ÷ Debt Value
+                            </p>
+                          </div>
+                          <div className="text-xs space-y-1 pt-2">
+                            <p className="text-green-400">• {'>'} 2.0: Excellent - Very safe</p>
+                            <p className="text-yellow-400">• 1.5-2.0: Good - Safe position</p>
+                            <p className="text-orange-400">• 1.1-1.5: Fair - Monitor closely</p>
+                            <p className="text-red-400">• {'<'} 1.1: At Risk - May be liquidated</p>
+                          </div>
+                          <p className="text-xs text-gray-500 pt-2 italic">
+                            Current value is based on your credit utilization ratio.
+                          </p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
 
                 {/* Credit Progress */}
