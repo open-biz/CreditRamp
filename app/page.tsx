@@ -348,15 +348,65 @@ export default function Home() {
     }
   };
 
+  // Check if a trustline exists for the given asset
+  const checkTrustline = async (assetSymbol: string): Promise<boolean> => {
+    if (!walletAddress) {
+      console.log('❌ No wallet address');
+      return false;
+    }
+    
+    try {
+      console.log(`🔍 Checking trustline for ${assetSymbol}...`);
+      const response = await fetch(
+        `https://horizon-testnet.stellar.org/accounts/${walletAddress}`
+      );
+      const data = await response.json();
+      
+      // XLM is native, so it doesn't need a trustline
+      if (assetSymbol === 'XLM') {
+        console.log('✅ XLM is native, no trustline needed');
+        return true;
+      }
+      
+      const assetIssuer = ASSET_ISSUERS[assetSymbol as keyof typeof ASSET_ISSUERS];
+      if (!assetIssuer) {
+        console.error(`❌ No issuer found for ${assetSymbol}`);
+        return false;
+      }
+      
+      const hasTrustline = data.balances.some((balance: any) => {
+        const matches = balance.asset_type === 'credit_alphanum4' && 
+                       balance.asset_code === assetSymbol && 
+                       balance.asset_issuer === assetIssuer;
+        if (matches) {
+          console.log(`✅ Found trustline for ${assetSymbol}`, balance);
+        }
+        return matches;
+      });
+      
+      if (!hasTrustline) {
+        console.log(`❌ No trustline found for ${assetSymbol}`);
+      }
+      
+      return hasTrustline;
+    } catch (error) {
+      console.error('❌ Error checking trustline:', error);
+      return false;
+    }
+  };
+
   const handleLend = async () => {
+    console.log('=== Starting handleLend ===');
+    
     // Pre-flight checks
     if (!walletAddress) {
+      console.log('❌ No wallet connected');
       alert('Please connect your wallet first');
       return;
     }
     
-    // Check if asset is selected
     if (!selectedAsset) {
+      console.log('❌ No asset selected');
       alert('Please select an asset from the pool cards below');
       return;
     }
@@ -364,11 +414,28 @@ export default function Home() {
     const assetSymbol = selectedAsset.assetSymbol;
     const assetBalance = assetBalances[assetSymbol] || 0;
     
+    console.log(`💰 Selected asset: ${assetSymbol}, Balance: ${assetBalance}`);
+    
     // Check if user has balance for selected asset
     if (assetBalance === 0) {
+      console.log(`❌ No balance for ${assetSymbol}, showing trustline modal`);
       setTrustlineError('no_balance');
       setShowTrustlineModal(true);
       return;
+    }
+    
+    // Skip trustline check for XLM (native asset)
+    if (assetSymbol === 'XLM') {
+      console.log('🔄 XLM selected, skipping trustline check');
+    } else {
+      console.log(`🔍 Checking trustline for ${assetSymbol}...`);
+      const hasTrustline = await checkTrustline(assetSymbol);
+      if (!hasTrustline) {
+        console.log(`❌ No trustline for ${assetSymbol}, showing trustline modal`);
+        setTrustlineError('no_trustline');
+        setShowTrustlineModal(true);
+        return;
+      }
     }
     
     if (lendAmount > assetBalance) {
@@ -383,24 +450,29 @@ export default function Home() {
     
     try {
       setLoading(true);
-      console.log('🚀 Starting lend with wallet:', walletAddress);
-      console.log(`💵 Amount to lend: ${lendAmount} ${assetSymbol}`);
-      console.log('🎯 Pool ID:', selectedAsset.poolId);
-      
-      // Get the correct Asset object and pool ID
       const asset = getAssetFromSymbol(assetSymbol);
       const poolId = selectedAsset.poolId;
       
-      await supplyCollateral(poolId, asset, BigInt(Math.floor(lendAmount * 1e7)), walletAddress!, NETWORK);
+      console.log(`🚀 Starting lend with wallet: ${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`);
+      console.log(`💵 Amount to lend: ${lendAmount} ${assetSymbol}`);
+      console.log(`🎯 Pool ID: ${poolId}`);
       
+      await supplyCollateral(poolId, asset, BigInt(Math.floor(lendAmount * 1e7)), walletAddress, NETWORK);
       alert(`Lend successful! ${lendAmount.toFixed(2)} ${assetSymbol} supplied to the pool.`);
-      // Refresh balance
-      await checkWalletBalance();
-    } catch (error: any) {
-      console.error('Lend error:', error);
       
-      const errorMsg = error.message || error.toString();
-      if (errorMsg.includes('trustline')) {
+      // Refresh balances
+      await checkWalletBalance();
+    } catch (error) {
+      console.error('Lend error:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      
+      // Handle specific errors
+      if (errorMsg.includes('op_no_trust') || errorMsg.includes('op_not_authorized')) {
+        setTrustlineError('no_trustline');
+        setShowTrustlineModal(true);
+      } else if (errorMsg.includes('op_underfunded') || errorMsg.includes('balance')) {
+        alert(`Insufficient ${assetSymbol} balance. You have ${assetBalance.toFixed(2)} ${assetSymbol}`);
+      } else if (errorMsg.includes('trustline')) {
         setTrustlineError('missing_trustline');
         setShowTrustlineModal(true);
       } else {
@@ -871,12 +943,14 @@ export default function Home() {
                 </div>
                 <div className="flex-1">
                   <h2 className="text-2xl font-bold mb-2">
-                    {trustlineError === 'no_balance' ? 'USDC Setup Required' : 'Trustline Required'}
+                    {trustlineError === 'no_balance' 
+                      ? `${selectedAsset?.assetSymbol || 'Asset'} Setup Required` 
+                      : 'Trustline Required'}
                   </h2>
                   <p className="text-white/80">
                     {trustlineError === 'no_balance' 
-                      ? 'Your wallet needs USDC to lend. Follow these steps to get started.'
-                      : 'Your wallet needs a USDC trustline to interact with USDC on Stellar.'}
+                      ? `Your wallet needs ${selectedAsset?.assetSymbol || 'the selected asset'} to lend. Follow these steps to get started.`
+                      : `Your wallet needs a ${selectedAsset?.assetSymbol || 'USDC'} trustline to interact with ${selectedAsset?.assetSymbol || 'USDC'} on Stellar.`}
                   </p>
                 </div>
               </div>
@@ -896,7 +970,7 @@ export default function Home() {
                       <div className="bg-black/30 rounded-lg p-3 space-y-2">
                         <div className="flex justify-between items-center text-xs">
                           <span className="text-white/60">Asset Code:</span>
-                          <code className="bg-white/10 px-2 py-1 rounded">USDC</code>
+                          <code className="bg-white/10 px-2 py-1 rounded">{selectedAsset?.assetSymbol || 'USDC'}</code>
                         </div>
                         <div className="flex justify-between items-start text-xs">
                           <span className="text-white/60 flex-shrink-0 mr-2">Issuer:</span>
@@ -945,9 +1019,11 @@ export default function Home() {
                       2
                     </div>
                     <div className="flex-1">
-                      <h3 className="font-semibold mb-2">Get Test USDC</h3>
+                      <h3 className="font-semibold mb-2">Get Test {selectedAsset?.assetSymbol || 'USDC'}</h3>
                       <p className="text-sm text-white/70 mb-3">
-                        You need some USDC tokens to start lending. Use one of these testnet faucets:
+                        {selectedAsset?.assetSymbol === 'XLM' 
+                          ? 'You need some XLM for transaction fees. Use one of these testnet faucets:'
+                          : `You need some ${selectedAsset?.assetSymbol || 'USDC'} tokens to start lending. Use one of these testnet faucets:`}
                       </p>
                       <div className="space-y-2">
                         <a
